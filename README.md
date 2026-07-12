@@ -24,4 +24,4 @@ terraform apply "plan"  # May require sudo for KinD
 ### Ingestion Service
 - Not sure how worth it it is, but I want to test what would be faster - manually creating JWT's and signing my messages to Coinbase's Advanced Trade API vs using the CDP SDK.
   On one hand, although good to learn, it does suck to write that boiler plate code since it feels like bad practice. On the other hand, importing the SDK will also import a ton
-  of Web3 bloat that I simply will not need. If the project expands to need that, I can always make another separate service.
+  of Web3 bloat that I simply will not need. If the project expands to need that, I can always make another separate service. For now, I will stick to the manual route.
