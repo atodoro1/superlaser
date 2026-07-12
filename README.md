@@ -8,10 +8,20 @@ At the moment, I'm just doing this localy on a KinD cluster, but eventually I'll
 I used a local [KinD (Kubernetes in Docker)](https://kind.sigs.k8s.io/) cluster using the 
 `kindest/node:v1.33.12` node image.
 
-## 1) Spin up the infra
+### Ingestion Service
+A python service that will subscribe to a Coinbase Advanced API channel for live market data.
+
+## Deployment
+### Spin up the infra
 ```bash
 cd infra/
 terrafor init
 terraform plan -out "plan"
 terraform apply "plan"  # May require sudo for KinD
 ```
+
+## Design Choices
+### Ingestion Service
+- Not sure how worth it it is, but I want to test what would be faster - manually creating JWT's and signing my messages to Coinbase's Advanced Trade API vs using the CDP SDK.
+  On one hand, although good to learn, it does suck to write that boiler plate code since it feels like bad practice. On the other hand, importing the SDK will also import a ton
+  of Web3 bloat that I simply will not need. If the project expands to need that, I can always make another separate service.

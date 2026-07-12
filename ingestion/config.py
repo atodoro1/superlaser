@@ -1,12 +1,11 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class AppSettings(BaseSettings):
-    # Pydantic automatically looks for these environment variables (or inside .env)
-    api_key: str
-    signing_key: str
+    coinbase_key_id: str = Field(validation_alias="COINBASE_KEY_ID")
+    coinbase_private_key: str = Field(validation_alias="COINBASE_PRIVATE_KEY")
     ws_api_url: str = "wss://advanced-trade-ws.coinbase.com"
 
-    # Strict configuration to look for a local .env file
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 settings = AppSettings()
