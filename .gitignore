@@ -1,4 +1,5 @@
 .env
+cdp_api_key.json
 .terraform*
 terraform.tfstate*
 *cluster-config
