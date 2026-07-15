@@ -30,3 +30,5 @@ terraform apply "plan"  # May require sudo for KinD
 - Now the issue is how do I toggle the ingestion service? Yes, it could automatically subscribe to the feed, but how would I unsubscribe? I could make it a webservice with FastAPI
   or something, but this seems rather bloated. I'm thinking of having it unsubscribe on SIGTERM, which is how k8s will destroy the container. If I need to communicate with the
   service in more ways, I could probably add signal handlers and make a cli that sends signals via kubectl. I do not imagine the user will interact much with this service.
+  **Decision: I won't even unsubscribe, but I'll rely on the server automatically closing my connection after the heartbeats stop coming in.**
+
