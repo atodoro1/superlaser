@@ -1,4 +1,3 @@
-# ingestion/main.py
 import sys
 import json
 import time
@@ -7,13 +6,34 @@ import os
 import signal
 import jwt
 import websocket
+import logging
+from functools import lru_cache
 from config import settings
 from util import get_private_key
 
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("superlaser.ingestion")
+
+
+# lru_cache ensures your Ed25519 key is parsed/loaded from disk ONCE
+# and served from memory for all subsequent connection/subscription frames.
+@lru_cache(maxsize=1)
+def get_cached_private_key():
+    logger.info("Loading private key (cached for future operations)...")
+    return get_private_key()
+
+
 def sign_websocket_message(message: dict) -> dict:
-    """Signs a WS subscription frame payload using the Ed25519 key."""
-    private_key = get_private_key()
+    """Signs a WS subscription frame payload using the cached Ed25519 key."""
+    private_key = get_cached_private_key()
     payload = {
         "iss": "coinbase-cloud",
         "nbf": int(time.time()),
@@ -21,7 +41,6 @@ def sign_websocket_message(message: dict) -> dict:
         "sub": settings.coinbase_key_id,
     }
     headers = {
-        "alg": "EdDSA",
         "kid": settings.coinbase_key_id,
         "nonce": hashlib.sha256(os.urandom(16)).hexdigest()
     }
@@ -31,97 +50,132 @@ def sign_websocket_message(message: dict) -> dict:
 
 
 class SuperlaserIngestionService:
-    def __init__(self, products: list[str], channel: str):
+    def __init__(self, products: list[str], channels: list[str]):
         self.products = products
-        self.channel = channel
+        self.channels = channels  # Fixed typo: changed from self.channel to match signature
         self.ws = None
         self.running = True
+
+        self.msg_count = 0
+        self.last_metrics_report = time.time()
 
         # Handle system termination signals cleanly
         signal.signal(signal.SIGINT, self.handle_shutdown)
         signal.signal(signal.SIGTERM, self.handle_shutdown)
 
     def on_message(self, ws, message):
-        """Main data ingestion pipeline endpoint."""
-        data = json.loads(message)
+        """Main hot-path data ingestion pipeline endpoint."""
+        self.msg_count += 1
+        now = time.time()
         
-        # TODO: Handle actual ingestion logic (e.g., pipeline, DB, etc.)
-        print(json.dumps(data) + "\n")
+        # Periodically report metrics (every 10 seconds)
+        if now - self.last_metrics_report >= 10.0:
+            elapsed = now - self.last_metrics_report
+            rate = self.msg_count / elapsed
+            logger.info(f"Ingestion metrics: Processed {self.msg_count} messages over the last {elapsed:.2f}s ({rate:.2f} msg/sec)")
+            
+            self.msg_count = 0
+            self.last_metrics_report = now
+
+        try:
+            data = json.loads(message)
+            
+            # TODO: Direct hands-off handoff to your queue, DB, or pipeline
+            print(json.dumps(data) + "\n")
+
+        except json.JSONDecodeError:
+            logger.error("Failed to parse incoming WebSocket frame as JSON.")
 
     def on_open(self, ws):
-        """Fires when socket connects; performs signed subscription."""
-        print(f"Connected to Coinbase WebSocket. Subscribing to '{self.channel}'...")
-        message = {
-            "type": "subscribe",
-            "channel": self.channel,
-            "product_ids": self.products
-        }
-        signed_message = sign_websocket_message(message)
-        ws.send(json.dumps(signed_message))
-
-    def on_error(self, ws, error):
-        print(f"WS Error: {error}", file=sys.stderr)
-
-    def on_close(self, ws, close_status_code, close_msg):
-        print(f"WS Closed. Code: {close_status_code}, Msg: {close_msg}")
-
-    def handle_shutdown(self, signum, frame):
-        """Gracefully unsubscribes from feed on the active socket and exits."""
-        if not self.running:
-            return
+        """Fires when socket connects; performs signed subscriptions in a loop."""
+        logger.info(f"Connected to Coinbase WebSocket. Subscribing to: {self.channels}...")
         
-        print(f"\nReceived termination signal ({signum}). Shutting down cleanly...")
-        self.running = False
-
-        if self.ws and self.ws.sock and self.ws.sock.connected:
-            print("Sending unsubscribe payload...")
-            message = {
-                "type": "unsubscribe",
-                "channel": self.channel,
+        for channel in self.channels:
+            payload = {
+                "type": "subscribe",
+                "channel": channel,
                 "product_ids": self.products
             }
             try:
-                signed_message = sign_websocket_message(message)
-                self.ws.send(json.dumps(signed_message))
-                time.sleep(0.5)  # Pause to let frame send
+                ws.send(json.dumps(sign_websocket_message(payload)))
+                logger.info(f"Subscription request sent for channel: '{channel}'")
             except Exception as e:
-                print(f"Failed to unsubscribe: {e}", file=sys.stderr)
+                logger.error(f"Failed to send subscription for '{channel}': {e}")
+
+    def on_error(self, ws, error):
+        logger.error(f"WebSocket Error: {error}")
+
+    def on_close(self, ws, close_status_code, close_msg):
+        logger.warning(f"WebSocket Closed. Code: {close_status_code} | Msg: {close_msg}")
+
+    def handle_shutdown(self, signum, frame):
+        """Gracefully unsubscribes from feeds in a loop and exits."""
+        if not self.running:
+            return
+        
+        logger.info(f"Received termination signal ({signum}). Initiating clean shutdown...")
+        self.running = False
+
+        if self.ws and self.ws.sock and self.ws.sock.connected:
+            logger.info("Unsubscribing from active feeds...")
+            try:
+                for channel in self.channels:
+                    payload = {
+                        "type": "unsubscribe",
+                        "channel": channel,
+                        "product_ids": self.products
+                    }
+                    self.ws.send(json.dumps(sign_websocket_message(payload)))
+                time.sleep(0.5)  # Pause to let frames send
+            except Exception as e:
+                logger.error(f"Failed to unsubscribe cleanly during shutdown: {e}")
             finally:
-                print("Closing socket connections...")
+                logger.info("Closing active socket connection...")
                 self.ws.close()
         
-        print("Service stopped cleanly.")
+        logger.info("Service stopped cleanly.")
         sys.exit(0)
 
     def start(self):
-        """Starts the blocking connection loop."""
-        self.ws = websocket.WebSocketApp(
-            settings.ws_api_url,
-            on_open=self.on_open,
-            on_message=self.on_message,
-            on_error=self.on_error,
-            on_close=self.on_close
-        )
-        # Built-in WS heartbeats keep the connection alive
-        self.ws.run_forever(ping_interval=10, ping_timeout=5)
+        """Starts the connection loop with automatic reconnection."""
+        logger.info("Booting Superlaser Ingestion Service...")
+        
+        while self.running:
+            try:
+                self.ws = websocket.WebSocketApp(
+                    settings.ws_api_url,
+                    on_open=self.on_open,
+                    on_message=self.on_message,
+                    on_error=self.on_error,
+                    on_close=self.on_close
+                )
+                self.ws.run_forever(ping_interval=10, ping_timeout=5)
+            except Exception as e:
+                logger.error(f"Active connection dropped due to: {e}")
+            
+            if self.running:
+                logger.info("Connection lost. Reconnecting in 5 seconds...")
+                time.sleep(5)
 
 
 def main():
     if not settings.coinbase_key_id or not settings.coinbase_private_key:
-        print(
-            "CRITICAL: COINBASE_KEY_ID and COINBASE_PRIVATE_KEY must be "
-            "provided in your .env configuration.",
-            file=sys.stderr
+        logger.critical(
+            "COINBASE_KEY_ID and COINBASE_PRIVATE_KEY must be "
+            "provided in your .env configuration."
         )
         sys.exit(1)
 
-    # Initialize and boot daemon
+    # Note: To prevent Coinbase from closing idle feeds during periods of
+    # low trade volume, include the "heartbeats" channel in the list below.
     service = SuperlaserIngestionService(
         products=["BTC-USD"],
-        channel="level2"
+        channels=[
+            "level2",
+            "heartbeats",
+        ]
     )
 
-    print("Booting Superlaser Ingestion Service...")
     service.start()
 
 if __name__ == "__main__":
