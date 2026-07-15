@@ -22,8 +22,11 @@ terraform plan -out "plan"
 terraform apply "plan"  # May require sudo for KinD
 ```
 
-## Design Choices
+## Design Choices / Thoughts
 ### Ingestion Service
 - Not sure how worth it it is, but I want to test what would be faster - manually creating JWT's and signing my messages to Coinbase's Advanced Trade API vs using the CDP SDK.
   On one hand, although good to learn, it does suck to write that boiler plate code since it feels like bad practice. On the other hand, importing the SDK will also import a ton
   of Web3 bloat that I simply will not need. If the project expands to need that, I can always make another separate service. For now, I will stick to the manual route.
+- Now the issue is how do I toggle the ingestion service? Yes, it could automatically subscribe to the feed, but how would I unsubscribe? I could make it a webservice with FastAPI
+  or something, but this seems rather bloated. I'm thinking of having it unsubscribe on SIGTERM, which is how k8s will destroy the container. If I need to communicate with the
+  service in more ways, I could probably add signal handlers and make a cli that sends signals via kubectl. I do not imagine the user will interact much with this service.
