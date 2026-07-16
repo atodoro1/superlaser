@@ -81,7 +81,7 @@ class SuperlaserIngestionService:
             data = json.loads(message)
             
             # TODO: Direct hands-off handoff to your queue, DB, or pipeline
-            print(json.dumps(data) + "\n")
+            print(message + "\n")
 
         except json.JSONDecodeError:
             logger.error("Failed to parse incoming WebSocket frame as JSON.")
