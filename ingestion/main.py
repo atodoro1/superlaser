@@ -102,7 +102,7 @@ class SuperlaserIngestionService:
                 logger.error(f"Failed to send subscription for '{channel}': {e}")
 
     def on_error(self, ws, error):
-        logger.error(f"WebSocket Error: {error}")
+        logger.error(f"WebSocket Error: {error}", exc_info=True)
 
     def on_close(self, ws, close_status_code, close_msg):
         logger.warning(f"WebSocket Closed. Code: {close_status_code} | Msg: {close_msg}")
@@ -133,7 +133,6 @@ class SuperlaserIngestionService:
                 self.ws.close()
         
         logger.info("Service stopped cleanly.")
-        sys.exit(0)
 
     def start(self):
         """Starts the connection loop with automatic reconnection."""
