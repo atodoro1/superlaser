@@ -56,7 +56,7 @@ class SuperlaserIngestionService:
         self.ws = None
         self.running = True
 
-        self.msg_count = 0
+        self.msg_count_mod5k = 0
         self.last_metrics_report = time.time()
 
         # Handle system termination signals cleanly
@@ -65,16 +65,15 @@ class SuperlaserIngestionService:
 
     def on_message(self, ws, message):
         """Main hot-path data ingestion pipeline endpoint."""
-        self.msg_count += 1
-        now = time.time()
+        self.msg_count_mod5k += 1
         
-        # Periodically report metrics (every 10 seconds)
-        if now - self.last_metrics_report >= 10.0:
+        if self.msg_count_mod5k % 5000 == 0:
+            now = time.time()
             elapsed = now - self.last_metrics_report
-            rate = self.msg_count / elapsed
-            logger.info(f"Ingestion metrics: Processed {self.msg_count} messages over the last {elapsed:.2f}s ({rate:.2f} msg/sec)")
-            
-            self.msg_count = 0
+            rate = self.msg_count_mod5k / elapsed
+            logger.info(f"Processed {self.msg_count_mod5k} messages in {elapsed:.2f}s ({rate:.2f} msg/s)")
+
+            self.msg_count_mod5k = 0
             self.last_metrics_report = now
 
         try:
